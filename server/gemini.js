@@ -1,7 +1,7 @@
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Gemini ko call karke JSON wapas leta hai. Fail ho to 3 baar retry.
-async function askJson(prompt, tries = 3) {
+async function askJson(prompt, tries = 5) {
   const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`;
   for (let i = 0; i < tries; i++) {
@@ -14,12 +14,19 @@ async function askJson(prompt, tries = 3) {
           generationConfig: { responseMimeType: 'application/json', temperature: 0.2 },
         }),
       });
-      if (!res.ok) throw new Error('Gemini error ' + res.status);
+      if (!res.ok) {
+        const body = await res.text();
+        let msg = body;
+        try { msg = JSON.parse(body).error.message; } catch {}
+        const err = new Error('Gemini error ' + res.status + ': ' + String(msg).slice(0, 200));
+        err.noRetry = [400, 401, 403, 404].includes(res.status);
+        throw err;
+      }
       const data = await res.json();
       return JSON.parse(data.candidates[0].content.parts[0].text);
     } catch (e) {
-      if (i === tries - 1) throw e;
-      await sleep(1000 * (i + 1));
+      if (e.noRetry || i === tries - 1) throw e;
+      await sleep(3000 * (i + 1));
     }
   }
 }
